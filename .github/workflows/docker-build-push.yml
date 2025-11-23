@@ -1,38 +1,47 @@
-name: Build and Push to ECR
+name: Build & Push to ECR
 
 on:
   push:
     branches: [ "main" ]
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
   ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
 
 jobs:
-  build:
+  build_and_push:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+    - name: Ensure repository exists
+      run: |
+        aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
+        aws ecr create-repository --repository-name $ECR_REPOSITORY
 
-      - name: Build Docker image
-        run: |
-          docker build -t $ECR_REPOSITORY:latest .
-      - name: Tag image
-        run: |
-          docker tag $ECR_REPOSITORY:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
-      - name: Push image
-        run: |
-          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
+    - name: Login to ECR
+      run: |
+        aws ecr get-login-password --region $AWS_REGION | \
+        docker login --username AWS --password-stdin \
+        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+    - name: Build image
+      run: docker build -t $ECR_REPOSITORY .
+
+    - name: Tag image
+      run: docker tag $ECR_REPOSITORY:latest \
+           $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
+
+    - name: Push image
+      run: docker push \
+           $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
