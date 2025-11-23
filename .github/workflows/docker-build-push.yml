@@ -4,39 +4,65 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout del código
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Debug variables
-        run: |
-          echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}"
-          echo "AWS_REGION=${{ secrets.AWS_REGION }}"
-          echo "ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}"
-          echo "Registrando imagen en:"
-          echo "${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest"
+    # Configurar credenciales de AWS
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
+    # DEBUG: Ver si los secretos están llegando
+    - name: Debug Variables
+      run: |
+        echo "AWS ACCOUNT: $AWS_ACCOUNT_ID"
+        echo "AWS REGION: $AWS_REGION"
+        echo "REPO: $ECR_REPOSITORY"
+        aws sts get-caller-identity
 
-      - name: Configurar credenciales de AWS
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+    # Crear repo ECR si no existe
+    - name: Ensure ECR Repository Exists
+      run: |
+        aws ecr describe-repositories \
+          --repository-names $ECR_REPOSITORY \
+          --region $AWS_REGION || \
+        aws ecr create-repository \
+          --repository-name $ECR_REPOSITORY \
+          --region $AWS_REGION
 
-      - name: Login en Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+    # Login al registry de ECR
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region $AWS_REGION | \
+        docker login --username AWS --password-stdin \
+        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      - name: Construir, etiquetar y push de imagen a ECR
-        env:
-          ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-        run: |
-          IMAGE_TAG=latest
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+    # Construir imagen Docker
+    - name: Build Docker image
+      run: |
+        docker build -t $ECR_REPOSITORY .
+
+    # Etiquetar imagen para ECR
+    - name: Tag Docker image
+      run: |
+        docker tag $ECR_REPOSITORY:latest \
+        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
+
+    # Publicar en ECR
+    - name: Push Docker image
+      run: |
+        docker push \
+        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
