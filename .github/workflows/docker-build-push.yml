@@ -12,6 +12,15 @@ jobs:
       - name: Checkout del código
         uses: actions/checkout@v4
 
+      - name: Debug variables
+        run: |
+          echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}"
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}"
+          echo "ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}"
+          echo "Registrando imagen en:"
+          echo "${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest"
+
+
       - name: Configurar credenciales de AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
