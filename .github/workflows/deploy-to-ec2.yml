@@ -24,41 +24,12 @@ jobs:
         echo "${{ secrets.EC2_SSH_KEY }}" | base64 -d > private_key.pem
         chmod 600 private_key.pem
 
-    - name: Deploy on EC2
+    - name: Execute deploy.sh on EC2
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          echo "==> Actualizando servidor"
-          sudo yum update -y
-          sudo service docker start || true
-
-          echo "==> Login en ECR"
-          aws ecr get-login-password --region $AWS_REGION \
-            | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-
-          echo "==> Descargando última imagen"
-          docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest
-
-          echo "==> Validando si el contenedor está corriendo"
-          if [ "$(docker ps -q -f name=app)" ]; then
-            echo "Contenedor en ejecución → deteniendo..."
-            docker stop app
-          fi
-
-          echo "==> Validando si el contenedor existe"
-          if [ "$(docker ps -aq -f name=app)" ]; then
-            echo "Contenedor encontrado → eliminando..."
-            docker rm app
-          fi
-
-          echo "==> Eliminando imágenes viejas"
-          docker image prune -f
-
-          echo "==> Iniciando nuevo contenedor en el puerto 80"
-          docker run -d --name app -p 80:80 ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest
-
-          echo "==> Verificando despliegue"
-          docker ps -a
+          echo "==> Ejecutando deploy.sh en EC2"
+          bash /home/ec2-user/deploy.sh
