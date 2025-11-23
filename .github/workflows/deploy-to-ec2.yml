@@ -1,44 +1,64 @@
 name: Deploy to EC2
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
   EC2_HOST: ${{ secrets.EC2_HOST }}
   EC2_USER: ${{ secrets.EC2_USER }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production 
+    environment: production
 
     steps:
+
     - name: Prepare SSH key
       run: |
         echo "${{ secrets.EC2_SSH_KEY }}" | base64 -d > private_key.pem
         chmod 600 private_key.pem
 
-    - name: Execute deploy script on EC2
-      run: |
-        ssh -o StrictHostKeyChecking=no \
-            -i private_key.pem \
-            $EC2_USER@$EC2_HOST \
-            "bash /home/ec2-user/deploy.sh"
     - name: Deploy on EC2
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.EC2_HOST }}
-        username: ec2-user
+        username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
+          echo "==> Actualizando servidor"
           sudo yum update -y
           sudo service docker start || true
 
-          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
+          echo "==> Login en ECR"
+          aws ecr get-login-password --region $AWS_REGION \
+            | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
-          docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/mi-app:latest
+          echo "==> Descargando última imagen"
+          docker pull ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest
 
-          docker stop mi-app || true
-          docker rm mi-app || true
+          echo "==> Validando si el contenedor está corriendo"
+          if [ "$(docker ps -q -f name=app)" ]; then
+            echo "Contenedor en ejecución → deteniendo..."
+            docker stop app
+          fi
 
-          docker run -d --name mi-app -p 80:5000 ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/mi-app:latest
+          echo "==> Validando si el contenedor existe"
+          if [ "$(docker ps -aq -f name=app)" ]; then
+            echo "Contenedor encontrado → eliminando..."
+            docker rm app
+          fi
+
+          echo "==> Eliminando imágenes viejas"
+          docker image prune -f
+
+          echo "==> Iniciando nuevo contenedor en el puerto 80"
+          docker run -d --name app -p 80:80 ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest
+
+          echo "==> Verificando despliegue"
+          docker ps -a
